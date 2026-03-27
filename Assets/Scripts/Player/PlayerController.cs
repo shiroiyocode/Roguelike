@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,6 +7,8 @@ public class PlayerController : MonoBehaviour
     public float moveDistance = 1f;
     private Camera mainCamera;
     private List<Vector2> currentPath = new List<Vector2>();
+    private bool isTakingStep = false;
+    private MobBase pendingAttackTarget = null;
 
     [Header("Combat Stats")]
     public int damageMin = 3;
@@ -67,7 +70,7 @@ public class PlayerController : MonoBehaviour
 
         if (clickedTile == playerTile) return;
 
-        // Check if clicked tile has a mob on it
+        // Check if clicked tile has a mob
         Collider2D mobHit = Physics2D.OverlapBox(
             clickedTile,
             Vector2.one * 0.9f,
@@ -77,32 +80,98 @@ public class PlayerController : MonoBehaviour
 
         if (mobHit != null)
         {
-            // Check if mob is adjacent before attacking
+            MobBase mob = mobHit.GetComponent<MobBase>();
+            if (mob == null) return;
+
+            // Check if already adjacent — attack immediately
             Vector2 difference = clickedTile - playerTile;
             float distance = Mathf.Abs(difference.x) +
-                           Mathf.Abs(difference.y);
+                            Mathf.Abs(difference.y);
 
             if (distance <= 1f)
             {
-                // Attack the mob
-                MobBase mob = mobHit.GetComponent<MobBase>();
-                if (mob != null)
-                    TryAttack(mob);
+                TryAttack(mob);
+                return;
             }
+
+            // Not adjacent — path to nearest tile beside the mob
+            Vector2? approachTile =
+                GetApproachTile(clickedTile, playerTile);
+
+            if (approachTile != null)
+            {
+                // Store mob as target for when we arrive
+                pendingAttackTarget = mob;
+
+                List<Vector2> path = Pathfinder.Instance.FindPath(
+                    playerTile,
+                    approachTile.Value
+                );
+
+                if (path != null && path.Count > 0)
+                    currentPath = path;
+                    TakePathStep();
+            }
+
             return;
         }
 
-        // No mob on tile — try to move there
-        List<Vector2> path = Pathfinder.Instance.FindPath(
+        // No mob — path to clicked tile normally
+        List<Vector2> path2 = Pathfinder.Instance.FindPath(
             playerTile,
             clickedTile
         );
 
-        if (path != null && path.Count > 0)
+        if (path2 != null && path2.Count > 0)
         {
-            currentPath = path;
+            pendingAttackTarget = null;
+            currentPath = path2;
             TakePathStep();
         }
+    }
+
+    // Find the walkable tile closest to player adjacent to mob
+    Vector2? GetApproachTile(Vector2 mobTile, Vector2 playerTile)
+    {
+        Vector2[] neighbors = new Vector2[]
+        {
+        new Vector2(mobTile.x + 1, mobTile.y),
+        new Vector2(mobTile.x - 1, mobTile.y),
+        new Vector2(mobTile.x, mobTile.y + 1),
+        new Vector2(mobTile.x, mobTile.y - 1)
+        };
+
+        Vector2? closest = null;
+        float closestDist = float.MaxValue;
+
+        foreach (Vector2 neighbor in neighbors)
+        {
+            // Check if walkable
+            Collider2D wallHit = Physics2D.OverlapBox(
+                neighbor,
+                Vector2.one * 0.9f,
+                0f,
+                LayerMask.GetMask("Walls")
+            );
+
+            Collider2D mobHit = Physics2D.OverlapBox(
+                neighbor,
+                Vector2.one * 0.9f,
+                0f,
+                LayerMask.GetMask("Mobs")
+            );
+
+            if (wallHit != null || mobHit != null) continue;
+
+            float dist = Vector2.Distance(neighbor, playerTile);
+            if (dist < closestDist)
+            {
+                closestDist = dist;
+                closest = neighbor;
+            }
+        }
+
+        return closest;
     }
 
     void TryAttack(MobBase target)
@@ -135,17 +204,81 @@ public class PlayerController : MonoBehaviour
 
     public void OnTurnReady()
     {
-        if (currentPath.Count > 0)
+        if (pendingAttackTarget != null &&
+            pendingAttackTarget.gameObject == null)
+            pendingAttackTarget = null;
+
+        // If path is complete and there is a pending attack
+        if (currentPath.Count == 0 && pendingAttackTarget != null)
+        {
+            // Check if now adjacent to target
+            Vector2 playerTile = new Vector2(
+                Mathf.Floor(transform.position.x) + 0.5f,
+                Mathf.Floor(transform.position.y) + 0.5f
+            );
+
+            Vector2 mobTile = new Vector2(
+                Mathf.Floor(pendingAttackTarget.transform.position.x)
+                + 0.5f,
+                Mathf.Floor(pendingAttackTarget.transform.position.y)
+                + 0.5f
+            );
+
+            float distance = Vector2.Distance(playerTile, mobTile);
+
+            if (distance <= 1.5f)
+            {
+                MobBase target = pendingAttackTarget;
+                pendingAttackTarget = null;
+                TryAttack(target);
+                return;
+            }
+
+            // Mob moved away while player was walking
+            // Path to new approach tile
+            Vector2? newApproach =
+                GetApproachTile(mobTile, playerTile);
+
+            if (newApproach != null)
+            {
+                List<Vector2> path = Pathfinder.Instance.FindPath(
+                    playerTile,
+                    newApproach.Value
+                );
+
+                if (path != null && path.Count > 0)
+                {
+                    currentPath = path;
+                    TakePathStep();
+                    return;
+                }
+            }
+
+            // Cannot reach mob
+            pendingAttackTarget = null;
+            return;
+        }
+
+        // Continue path if steps remaining
+        if (currentPath.Count > 0 && !isTakingStep)
             TakePathStep();
     }
 
     void TakePathStep()
     {
         if (currentPath.Count == 0) return;
+        if (isTakingStep) return;
+
+        StartCoroutine(TakePathStepCoroutine());
+    }
+
+    IEnumerator TakePathStepCoroutine()
+    {
+        isTakingStep = true;
 
         Vector2 nextStep = currentPath[0];
 
-        // mobBlock check
+        // Check if mob is blocking
         Collider2D mobCheck = Physics2D.OverlapBox(
             nextStep,
             Vector2.one * 0.9f,
@@ -155,13 +288,14 @@ public class PlayerController : MonoBehaviour
 
         if (mobCheck != null)
         {
-            // Mob is blocking path — stop walking
             currentPath.Clear();
-            return;
+            isTakingStep = false;
+            yield break;
         }
 
         currentPath.RemoveAt(0);
 
+        // Check if wall is blocking
         Collider2D wallCheck = Physics2D.OverlapBox(
             nextStep,
             Vector2.one * 0.9f,
@@ -172,15 +306,24 @@ public class PlayerController : MonoBehaviour
         if (wallCheck != null)
         {
             currentPath.Clear();
-            return;
+            isTakingStep = false;
+            yield break;
         }
 
+        // Move player
         transform.position = new Vector3(
             nextStep.x,
             nextStep.y,
             0
         );
 
+        // Delay BEFORE ending turn so movement is visible
+        yield return new WaitForSeconds(0.08f);
+
+        // Clear step lock before ending turn
+        isTakingStep = false;
+
+        // End turn — this triggers mob turns then OnTurnReady
         TurnQueue.Instance.OnPlayerTurnEnd();
     }
 

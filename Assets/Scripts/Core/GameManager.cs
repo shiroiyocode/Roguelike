@@ -1,5 +1,4 @@
 using UnityEngine;
-using static Unity.Collections.AllocatorManager;
 
 public class GameManager : MonoBehaviour
 {
@@ -99,6 +98,21 @@ public class GameManager : MonoBehaviour
     void GameOver()
     {
         Debug.Log("Game Over");
+
+        if (GameOverScreen.Instance != null)
+            GameOverScreen.Instance.ShowGameOver();
+    }
+
+    public void ResetGame()
+    {
+        currentHP = 30;
+        maxHP = 30;
+        currentGold = 0;
+        currentFloor = 1;
+        currentEXP = 0;
+        expToNextLevel = 20;
+        playerLevel = 1;
+        mobsKilled = 0;
     }
 
     // Called when descending to next floor

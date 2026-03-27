@@ -35,6 +35,10 @@ public class Pathfinder : MonoBehaviour
 
     public List<Vector2> FindPath(Vector2 start, Vector2 end)
     {
+        float directDistance = Vector2.Distance(start, end);
+        if (directDistance > 30f)
+            return null;
+
         // Snap both positions to grid centers
         start = SnapToGrid(start);
         end = SnapToGrid(end);
@@ -45,6 +49,9 @@ public class Pathfinder : MonoBehaviour
         // Add starting node
         openList.Add(new Node(start, null, 0,
                     GetDistance(start, end)));
+
+        
+
 
         int maxIterations = 200;
         int iterations = 0;

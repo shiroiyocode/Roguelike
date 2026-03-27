@@ -44,24 +44,23 @@ public class TurnQueue : MonoBehaviour
     {
         isProcessing = true;
 
-        yield return new WaitForSeconds(0.1f);
-
-        // Process all mob turns
+        // Process all mob turns instantly
         List<ITurnTaker> currentTakers =
             new List<ITurnTaker>(turnTakers);
 
         foreach (ITurnTaker taker in currentTakers)
         {
             taker.TakeTurn();
-            yield return new WaitForSeconds(0.1f);
         }
+
+        // Single small delay at end of all mob turns
+        // Just enough for the player to see mob movement
+        yield return new WaitForSeconds(0.05f);
 
         isProcessing = false;
 
-        // Tell player turn cycle is complete
-        // Continue path if one is queued
         PlayerController player =
-        FindFirstObjectByType<PlayerController>();
+            FindFirstObjectByType<PlayerController>();
         if (player != null)
             player.OnTurnReady();
     }
